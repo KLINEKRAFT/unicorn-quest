@@ -1,212 +1,379 @@
+// Unicorn Quest - simple mobile top-down starter
+// Assets expected:
+// assets/grass.png, player.png, trees.png, unicorn.png, title.png, theme_music.wav
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+
+// crisp pixel scaling (keeps pixels sharp when scaled)
 ctx.imageSmoothingEnabled = false;
 
-// ---------- helpers ----------
+function resize() {
+  // Match canvas buffer to device pixels for sharpness
+  const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---------- Load assets ----------
 function loadImage(src) {
-  const img = new Image();
-  img.src = src;
-  return img;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load: " + src));
+    img.src = src;
+  });
 }
+
+const music = new Audio("assets/theme_music.wav");
+music.loop = true;
+music.volume = 0.5;
+
+let IMG = {
+  grass: null,
+  player: null,
+  trees: null,
+  unicorn: null,
+  title: null,
+};
+
+let assetsReady = false;
+
+// ---------- Game state ----------
+let state = "title"; // "title" | "play"
+let startedAudio = false;
+
+// World settings (simple, infinite tiling grass)
+const WORLD = {
+  width: 2600,   // world size in "pixels" of our game space
+  height: 1600,
+};
+
+// Camera follows player
+const camera = { x: 0, y: 0 };
+
+// Player settings
+const player = {
+  x: WORLD.width / 2,
+  y: WORLD.height / 2,
+  speed: 180, // pixels/second
+  size: 44,   // collision radius-ish
+  facing: "down",
+  animTime: 0,
+  animFrame: 0,
+};
+
+// Unicorn (goal)
+const unicorn = {
+  x: 300 + Math.random() * (WORLD.width - 600),
+  y: 300 + Math.random() * (WORLD.height - 600),
+  size: 52,
+  found: false,
+};
+
+// Trees as obstacles (generated)
+const trees = [];
+function generateTrees(count = 24) {
+  trees.length = 0;
+  for (let i = 0; i < count; i++) {
+    const t = {
+      x: 150 + Math.random() * (WORLD.width - 300),
+      y: 150 + Math.random() * (WORLD.height - 300),
+      r: 58, // collision radius
+    };
+
+    // keep trees away from player start and unicorn start
+    const dP = dist(t.x, t.y, player.x, player.y);
+    const dU = dist(t.x, t.y, unicorn.x, unicorn.y);
+    if (dP < 220 || dU < 220) {
+      i--;
+      continue;
+    }
+    trees.push(t);
+  }
+}
+
+// Simple helpers
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function rectsOverlap(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+function dist(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  return Math.hypot(dx, dy);
 }
 
-// ---------- assets ----------
-const images = {
-  title: loadImage("assets/title.png"),
-  player: loadImage("assets/player.png"),
-  unicorn: loadImage("assets/unicorn.png"),
-  chestClosed: loadImage("assets/chest_closed.png"),
-  chestOpen: loadImage("assets/chest_open.png"),
-  forest: loadImage("assets/tree.png"),
-};
+// ---------- Input ----------
+const keys = { up: false, down: false, left: false, right: false };
 
-// ---------- settings & math ----------
-const STATE = { TITLE: "title", PLAY: "play", WIN: "win" };
-let gameState = STATE.TITLE;
-let globalTime = 0; // used for sparkling effects
-
-const PLAYER_SHEET = {
-  frameW: 512, // Based on your 2048px wide image (4 cols)
-  frameH: 384, // Based on your 1536px tall image (4 rows)
-  drawW: 80, 
-  drawH: 60,
-  // Match your player.png row order
-  dirRow: { down: 0, right: 1, left: 2, up: 3 }
-};
-
-// Precise crops for your uploaded PNGs
-const UNICORN_CROP = { sx: 310, sy: 250, sw: 400, sh: 450 };
-const CHEST_CLOSED_CROP = { sx: 320, sy: 340, sw: 380, sh: 330 };
-const CHEST_OPEN_CROP   = { sx: 600, sy: 270, sw: 380, sh: 450 };
-const BIG_TREE_CROP = { sx: 1530, sy: 0, sw: 518, sh: 650 };
-
-// ---------- input ----------
-const keys = new Set();
+// Keyboard support (desktop testing)
 window.addEventListener("keydown", (e) => {
-  const k = e.key.toLowerCase();
-  keys.add(k);
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
+  if (e.key === "ArrowUp" || e.key === "w") keys.up = true;
+  if (e.key === "ArrowDown" || e.key === "s") keys.down = true;
+  if (e.key === "ArrowLeft" || e.key === "a") keys.left = true;
+  if (e.key === "ArrowRight" || e.key === "d") keys.right = true;
 });
-window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+window.addEventListener("keyup", (e) => {
+  if (e.key === "ArrowUp" || e.key === "w") keys.up = false;
+  if (e.key === "ArrowDown" || e.key === "s") keys.down = false;
+  if (e.key === "ArrowLeft" || e.key === "a") keys.left = false;
+  if (e.key === "ArrowRight" || e.key === "d") keys.right = false;
+});
 
-// ---------- game state ----------
-let world, player, sparkles = [], walkTrail = [];
+// Mobile D-pad buttons
+function bindHold(btnId, onDown, onUp) {
+  const el = document.getElementById(btnId);
+  const down = (ev) => { ev.preventDefault(); onDown(); };
+  const up = (ev) => { ev.preventDefault(); onUp(); };
 
-function resetGame() {
-  world = {
-    w: 2200, h: 2200,
-    obstacles: [
-      { x: 420, y: 350, w: 90, h: 90 },
-      { x: 900, y: 520, w: 90, h: 90 },
-      { x: 1280, y: 820, w: 90, h: 90 },
-    ],
-    chests: [
-      { x: 520, y: 780, opened: false },
-      { x: 1600, y: 520, opened: false },
-    ],
-    unicorn: { x: 1920, y: 1850, homeX: 1920, homeY: 1850, vx: 35, vy: 22, found: false }
-  };
+  el.addEventListener("pointerdown", down);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+  el.addEventListener("pointerleave", up);
+}
+bindHold("btnUp", () => (keys.up = true), () => (keys.up = false));
+bindHold("btnDown", () => (keys.down = true), () => (keys.down = false));
+bindHold("btnLeft", () => (keys.left = true), () => (keys.left = false));
+bindHold("btnRight", () => (keys.right = true), () => (keys.right = false));
 
-  player = {
-    x: 160, y: 160, w: 32, h: 32,
-    speed: 230, score: 0, dir: "down", frame: 0, animTime: 0
-  };
+// Tap/click canvas to start from title
+canvas.addEventListener("pointerdown", () => {
+  if (state === "title") startGame();
+});
+
+// ---------- Start game ----------
+function startGame() {
+  state = "play";
+
+  // Must start audio on a user gesture for mobile browsers
+  if (!startedAudio) {
+    startedAudio = true;
+    music.play().catch(() => {
+      // If it fails, user can tap again; we won't spam errors.
+    });
+  }
 }
 
-resetGame();
+// ---------- Rendering helpers ----------
+function drawImageCover(img, x, y, w, h) {
+  // Draw img to completely cover area (like CSS background-size: cover)
+  const iw = img.width, ih = img.height;
+  const scale = Math.max(w / iw, h / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
 
-// ---------- update ----------
+// Draw repeating grass by tiling the grass image
+function drawTiled(img, camX, camY, viewW, viewH) {
+  const tileW = img.width;
+  const tileH = img.height;
+
+  // Determine starting tile based on camera offset
+  const startX = Math.floor(camX / tileW) * tileW;
+  const startY = Math.floor(camY / tileH) * tileH;
+
+  for (let y = startY; y < camY + viewH; y += tileH) {
+    for (let x = startX; x < camX + viewW; x += tileW) {
+      const sx = x - camX;
+      const sy = y - camY;
+      ctx.drawImage(img, Math.floor(sx), Math.floor(sy));
+    }
+  }
+}
+
+// Draw a centered sprite (no sprite sheet slicing yet)
+function drawCentered(img, worldX, worldY, scale = 1) {
+  const x = worldX - camera.x;
+  const y = worldY - camera.y;
+
+  const w = img.width * scale;
+  const h = img.height * scale;
+
+  ctx.drawImage(
+    img,
+    Math.floor(x - w / 2),
+    Math.floor(y - h / 2),
+    Math.floor(w),
+    Math.floor(h)
+  );
+}
+
+// ---------- Collision ----------
+function resolveCircleCollision(px, py, pr, ox, oy, or) {
+  const dx = px - ox;
+  const dy = py - oy;
+  const d = Math.hypot(dx, dy);
+  const minD = pr + or;
+  if (d === 0 || d >= minD) return { x: px, y: py };
+  const push = (minD - d);
+  const nx = dx / d;
+  const ny = dy / d;
+  return { x: px + nx * push, y: py + ny * push };
+}
+
+// ---------- Update / Draw ----------
+let last = performance.now();
+
 function update(dt) {
-  globalTime += dt;
-
-  if (gameState === STATE.TITLE) {
-    if (keys.size > 0) gameState = STATE.PLAY;
-    return;
-  }
-
-  if (gameState === STATE.WIN) {
-    if (keys.has(" ")) { resetGame(); gameState = STATE.TITLE; }
-    return;
-  }
-
-  // Movement
+  // Movement input
   let vx = 0, vy = 0;
-  if (keys.has("arrowleft") || keys.has("a")) vx -= 1;
-  if (keys.has("arrowright") || keys.has("d")) vx += 1;
-  if (keys.has("arrowup") || keys.has("w")) vy -= 1;
-  if (keys.has("arrowdown") || keys.has("s")) vy += 1;
+  if (keys.up) vy -= 1;
+  if (keys.down) vy += 1;
+  if (keys.left) vx -= 1;
+  if (keys.right) vx += 1;
 
-  if (vx !== 0 || vy !== 0) {
-    if (Math.abs(vx) > Math.abs(vy)) player.dir = vx < 0 ? "left" : "right";
-    else player.dir = vy < 0 ? "up" : "down";
-    
+  // Normalize diagonal
+  if (vx !== 0 && vy !== 0) {
+    const inv = 1 / Math.hypot(vx, vy);
+    vx *= inv; vy *= inv;
+  }
+
+  // Facing / simple animation timer
+  const moving = (vx !== 0 || vy !== 0);
+  if (moving) {
+    if (Math.abs(vx) > Math.abs(vy)) {
+      player.facing = vx > 0 ? "right" : "left";
+    } else {
+      player.facing = vy > 0 ? "down" : "up";
+    }
     player.animTime += dt;
     if (player.animTime > 0.12) {
       player.animTime = 0;
-      player.frame = (player.frame + 1) % 4;
+      player.animFrame = (player.animFrame + 1) % 4;
     }
-    // Movement collision
-    const speed = vx !== 0 && vy !== 0 ? player.speed * 0.707 : player.speed;
-    const nx = player.x + vx * speed * dt;
-    const ny = player.y + vy * speed * dt;
-    
-    // Simple wall collision check
-    if (nx > 0 && nx < world.w - player.w) player.x = nx;
-    if (ny > 0 && ny < world.h - player.h) player.y = ny;
   } else {
-    player.frame = 0;
+    player.animFrame = 0;
+    player.animTime = 0;
   }
 
-  // Interaction (Chest)
-  if (keys.has("e")) {
-    world.chests.forEach(c => {
-      if (!c.opened && rectsOverlap(player, {x:c.x, y:c.y, w:64, h:64})) {
-        c.opened = true;
-        player.score += 10;
-      }
-    });
+  // Apply movement
+  const nx = player.x + vx * player.speed * dt;
+  const ny = player.y + vy * player.speed * dt;
+
+  player.x = clamp(nx, 0, WORLD.width);
+  player.y = clamp(ny, 0, WORLD.height);
+
+  // Collide with trees (circle-to-circle pushback)
+  for (const t of trees) {
+    const res = resolveCircleCollision(player.x, player.y, player.size * 0.55, t.x, t.y, t.r);
+    player.x = res.x;
+    player.y = res.y;
   }
 
-  // Win condition
-  if (rectsOverlap(player, {x:world.unicorn.x, y:world.unicorn.y, w:80, h:80})) {
-    gameState = STATE.WIN;
+  // Check unicorn found
+  if (!unicorn.found) {
+    const d = dist(player.x, player.y, unicorn.x, unicorn.y);
+    if (d < (player.size + unicorn.size) * 0.55) {
+      unicorn.found = true;
+    }
   }
+
+  // Camera follows player
+  const viewW = window.innerWidth;
+  const viewH = window.innerHeight;
+
+  camera.x = clamp(player.x - viewW / 2, 0, Math.max(0, WORLD.width - viewW));
+  camera.y = clamp(player.y - viewH / 2, 0, Math.max(0, WORLD.height - viewH));
 }
 
-// ---------- draw ----------
+function draw() {
+  const viewW = window.innerWidth;
+  const viewH = window.innerHeight;
+
+  ctx.clearRect(0, 0, viewW, viewH);
+
+  // Grass background
+  drawTiled(IMG.grass, camera.x, camera.y, viewW, viewH);
+
+  // Trees (draw with a consistent scale; your trees.png is a sheet of separate trees,
+  // but for simplicity we draw the full image once per tree as a placeholder "sticker".
+  // If you want, I can slice trees.png into individual tree sprites next.)
+  for (const t of trees) {
+    drawCentered(IMG.trees, t.x, t.y, 0.35);
+  }
+
+  // Unicorn (draw until found)
+  if (!unicorn.found) {
+    drawCentered(IMG.unicorn, unicorn.x, unicorn.y, 0.35);
+  }
+
+  // Player (same note: we’re drawing whole sprite sheet as placeholder.
+  // Next step is slicing frames cleanly.)
+  drawCentered(IMG.player, player.x, player.y, 0.35);
+
+  // HUD text (simple)
+  ctx.font = "16px sans-serif";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(12, 12, 230, 30);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(unicorn.found ? "You found the unicorn!" : "Find the unicorn…", 22, 33);
+}
+
 function drawTitle() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (images.title.complete) {
-    ctx.drawImage(images.title, 0, 0, canvas.width, canvas.height);
+  const viewW = window.innerWidth;
+  const viewH = window.innerHeight;
+
+  // background while loading
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, viewW, viewH);
+
+  if (!assetsReady) {
+    ctx.font = "18px sans-serif";
+    ctx.fillStyle = "#fff";
+    ctx.fillText("Loading…", 20, 40);
+    return;
   }
 
-  // Sparkling "Press Start" effect
-  const opacity = 0.5 + Math.sin(globalTime * 5) * 0.5;
-  ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
-  ctx.font = "bold 28px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText("PRESS ANY KEY TO START", canvas.width / 2, canvas.height - 80);
-  
-  // Extra sparkles around text
-  if (Math.random() > 0.8) {
-     const sx = (canvas.width / 2) + (Math.random() * 200 - 100);
-     const sy = (canvas.height - 80) + (Math.random() * 40 - 20);
-     ctx.fillStyle = "white";
-     ctx.fillRect(sx, sy, 2, 2);
-  }
-}
-
-function drawWorld() {
-  const camX = clamp(player.x - canvas.width / 2, 0, world.w - canvas.width);
-  const camY = clamp(player.y - canvas.height / 2, 0, world.h - canvas.height);
-
-  ctx.fillStyle = "#1a472a"; // Grass color
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Draw Chests
-  world.chests.forEach(c => {
-    const img = c.opened ? images.chestOpen : images.chestClosed;
-    const crop = c.opened ? CHEST_OPEN_CROP : CHEST_CLOSED_CROP;
-    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, c.x - camX, c.y - camY, 64, 64);
-  });
-
-  // Draw Unicorn
-  ctx.drawImage(images.unicorn, UNICORN_CROP.sx, UNICORN_CROP.sy, UNICORN_CROP.sw, UNICORN_CROP.sh, world.unicorn.x - camX, world.unicorn.y - camY, 80, 90);
-
-  // Draw Player (Fixed Slicing)
-  const row = PLAYER_SHEET.dirRow[player.dir];
-  const sx = player.frame * PLAYER_SHEET.frameW;
-  const sy = row * PLAYER_SHEET.frameH;
-
-  ctx.drawImage(
-    images.player,
-    sx, sy, PLAYER_SHEET.frameW, PLAYER_SHEET.frameH,
-    Math.floor(player.x - camX - 24), Math.floor(player.y - camY - 24), 
-    PLAYER_SHEET.drawW, PLAYER_SHEET.drawH
-  );
-
-  // UI
-  ctx.fillStyle = "white";
-  ctx.font = "20px Arial";
-  ctx.fillText(`Score: ${player.score}`, 20, 40);
-
-  if (gameState === STATE.WIN) {
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(0,0, canvas.width, canvas.height);
-    ctx.fillStyle = "gold";
-    ctx.font = "40px system-ui";
-    ctx.fillText("QUEST COMPLETE!", canvas.width/2 - 150, canvas.height/2);
-  }
+  drawImageCover(IMG.title, 0, 0, viewW, viewH);
 }
 
 function loop(now) {
-  const dt = 0.016; // fixed delta for simplicity
-  update(dt);
-  if (gameState === STATE.TITLE) drawTitle();
-  else drawWorld();
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+
+  if (state === "title") {
+    drawTitle();
+  } else {
+    update(dt);
+    draw();
+  }
+
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+
+// ---------- Boot ----------
+(async function boot() {
+  try {
+    // Load images
+    const [grass, playerImg, treesImg, unicornImg, titleImg] = await Promise.all([
+      loadImage("assets/grass.png"),
+      loadImage("assets/player.png"),
+      loadImage("assets/trees.png"),
+      loadImage("assets/unicorn.png"),
+      loadImage("assets/title.png"),
+    ]);
+
+    IMG.grass = grass;
+    IMG.player = playerImg;
+    IMG.trees = treesImg;
+    IMG.unicorn = unicornImg;
+    IMG.title = titleImg;
+
+    generateTrees(22);
+
+    assetsReady = true;
+    requestAnimationFrame(loop);
+  } catch (err) {
+    console.error(err);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.fillStyle = "#fff";
+    ctx.font = "18px sans-serif";
+    ctx.fillText("Error loading assets.", 20, 40);
+    ctx.font = "14px sans-serif";
+    ctx.fillText("Check /assets filenames (case-sensitive).", 20, 65);
+  }
+})();
