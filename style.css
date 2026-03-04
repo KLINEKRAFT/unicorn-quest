@@ -1,0 +1,49 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+  height: 100%;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none; /* prevents scrolling while playing */
+}
+
+/* D-pad */
+#controls {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 10;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+}
+
+#controls .row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.btn {
+  width: 68px;
+  height: 68px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 28px;
+  line-height: 68px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.35);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
