@@ -1,23 +1,24 @@
-
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Unicorn Quest</title>
-  <style>
-    html, body { margin: 0; height: 100%; background: #0b0f0c; }
-    canvas {
-      display: block;
-      margin: 0 auto;
-      width: min(100vw, 960px);
-      height: auto;
-      image-rendering: pixelated;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <canvas id="game" width="960" height="540"></canvas>
+  <canvas id="game"></canvas>
+
+  <!-- Mobile D-pad -->
+  <div id="controls" aria-label="controls">
+    <button class="btn" id="btnUp" aria-label="up">▲</button>
+    <div class="row">
+      <button class="btn" id="btnLeft" aria-label="left">◀</button>
+      <button class="btn" id="btnDown" aria-label="down">▼</button>
+      <button class="btn" id="btnRight" aria-label="right">▶</button>
+    </div>
+  </div>
+
   <script src="game.js"></script>
 </body>
 </html>
