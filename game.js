@@ -1,6 +1,14 @@
-// Unicorn Quest - mobile top-down starter (auto-slices your non-grid player sheet)
-// Assets expected:
-// assets/grass.png, player.png, trees.png, unicorn.png, title.png, theme_music.wav
+// Unicorn Quest - complete game.js
+// Uses your existing assets + title screen + theme music + mobile D-pad
+// Player animation is HARD-CROPPED to match your current non-grid player.png.
+//
+// Expected files (case-sensitive):
+// assets/grass.png
+// assets/player.png
+// assets/trees.png
+// assets/unicorn.png
+// assets/title.png
+// assets/theme_music.wav
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -15,7 +23,7 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-// ---------- Load assets ----------
+// ---------- Load helpers ----------
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -25,42 +33,71 @@ function loadImage(src) {
   });
 }
 
+// ---------- Audio ----------
 const music = new Audio("assets/theme_music.wav");
 music.loop = true;
 music.volume = 0.5;
 
-let IMG = { grass: null, player: null, trees: null, unicorn: null, title: null };
+// ---------- Assets ----------
+const IMG = {
+  grass: null,
+  player: null,
+  trees: null,
+  unicorn: null,
+  title: null,
+};
+
 let assetsReady = false;
 
 // ---------- Game state ----------
 let state = "title"; // "title" | "play"
 let startedAudio = false;
 
-// World settings
-const WORLD = { width: 2600, height: 1600 };
+// ---------- World ----------
+const WORLD = {
+  width: 2600,
+  height: 1600,
+};
+
 const camera = { x: 0, y: 0 };
 
-// Player
+// ---------- Player ----------
 const player = {
   x: WORLD.width / 2,
   y: WORLD.height / 2,
-  speed: 180,
-  size: 44,
-  facing: "down", // "down" | "up" | "left" | "right"
+  speed: 180,        // px/sec
+  collR: 22,         // collision radius
+  facing: "down",    // "down" | "up" | "left" | "right"
   animTime: 0,
   animFrame: 0,
 };
 
-// Unicorn (goal)
+// ---------- Unicorn (goal) ----------
 const unicorn = {
   x: 300 + Math.random() * (WORLD.width - 600),
   y: 300 + Math.random() * (WORLD.height - 600),
-  size: 52,
+  collR: 26,
   found: false,
 };
 
-// Trees obstacles
+// ---------- Trees as obstacles ----------
 const trees = [];
+function dist(x1, y1, x2, y2) {
+  return Math.hypot(x2 - x1, y2 - y1);
+}
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
+}
+function resolveCircleCollision(px, py, pr, ox, oy, or) {
+  const dx = px - ox;
+  const dy = py - oy;
+  const d = Math.hypot(dx, dy);
+  const minD = pr + or;
+  if (d === 0 || d >= minD) return { x: px, y: py };
+  const push = (minD - d);
+  return { x: px + (dx / d) * push, y: py + (dy / d) * push };
+}
+
 function generateTrees(count = 22) {
   trees.length = 0;
   for (let i = 0; i < count; i++) {
@@ -70,21 +107,21 @@ function generateTrees(count = 22) {
       r: 58,
     };
 
+    // Keep trees away from player start and unicorn start
     const dP = dist(t.x, t.y, player.x, player.y);
     const dU = dist(t.x, t.y, unicorn.x, unicorn.y);
-    if (dP < 220 || dU < 220) { i--; continue; }
+    if (dP < 220 || dU < 220) {
+      i--;
+      continue;
+    }
     trees.push(t);
   }
 }
 
-// Helpers
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function dist(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
-
 // ---------- Input ----------
 const keys = { up: false, down: false, left: false, right: false };
 
-// Keyboard (desktop testing)
+// Keyboard for desktop testing
 window.addEventListener("keydown", (e) => {
   if (e.key === "ArrowUp" || e.key === "w") keys.up = true;
   if (e.key === "ArrowDown" || e.key === "s") keys.down = true;
@@ -98,11 +135,14 @@ window.addEventListener("keyup", (e) => {
   if (e.key === "ArrowRight" || e.key === "d") keys.right = false;
 });
 
-// Mobile D-pad
+// Mobile D-pad buttons from your HTML
 function bindHold(btnId, onDown, onUp) {
   const el = document.getElementById(btnId);
+  if (!el) return;
+
   const down = (ev) => { ev.preventDefault(); onDown(); };
   const up = (ev) => { ev.preventDefault(); onUp(); };
+
   el.addEventListener("pointerdown", down);
   el.addEventListener("pointerup", up);
   el.addEventListener("pointercancel", up);
@@ -113,13 +153,15 @@ bindHold("btnDown", () => (keys.down = true), () => (keys.down = false));
 bindHold("btnLeft", () => (keys.left = true), () => (keys.left = false));
 bindHold("btnRight", () => (keys.right = true), () => (keys.right = false));
 
-// Tap canvas to start
+// Tap canvas to start from title
 canvas.addEventListener("pointerdown", () => {
   if (state === "title") startGame();
 });
 
 function startGame() {
   state = "play";
+
+  // Mobile browsers require user gesture for audio
   if (!startedAudio) {
     startedAudio = true;
     music.play().catch(() => {});
@@ -131,12 +173,15 @@ function drawImageCover(img, x, y, w, h) {
   const iw = img.width, ih = img.height;
   const scale = Math.max(w / iw, h / ih);
   const dw = iw * scale, dh = ih * scale;
-  const dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
 function drawTiled(img, camX, camY, viewW, viewH) {
-  const tileW = img.width, tileH = img.height;
+  const tileW = img.width;
+  const tileH = img.height;
+
   const startX = Math.floor(camX / tileW) * tileW;
   const startY = Math.floor(camY / tileH) * tileH;
 
@@ -150,179 +195,87 @@ function drawTiled(img, camX, camY, viewW, viewH) {
 function drawCenteredSticker(img, worldX, worldY, scale = 1) {
   const x = worldX - camera.x;
   const y = worldY - camera.y;
-  const w = img.width * scale, h = img.height * scale;
-  ctx.drawImage(img, Math.floor(x - w / 2), Math.floor(y - h / 2), Math.floor(w), Math.floor(h));
+  const w = img.width * scale;
+  const h = img.height * scale;
+  ctx.drawImage(
+    img,
+    Math.floor(x - w / 2),
+    Math.floor(y - h / 2),
+    Math.floor(w),
+    Math.floor(h)
+  );
 }
 
-// ---------- Collision ----------
-function resolveCircleCollision(px, py, pr, ox, oy, or) {
-  const dx = px - ox, dy = py - oy;
-  const d = Math.hypot(dx, dy);
-  const minD = pr + or;
-  if (d === 0 || d >= minD) return { x: px, y: py };
-  const push = (minD - d);
-  return { x: px + (dx / d) * push, y: py + (dy / d) * push };
-}
-
-// ---------- AUTO SLICE: player sheet frames ----------
-let PLAYER_FRAMES = null;
+// ---------- HARD-CROPPED PLAYER FRAMES (for your current player.png) ----------
 /*
-PLAYER_FRAMES format:
-{
-  down: { idle:[rect,rect,rect], walk:[rect...] },
-  up:   { walk:[rect...] },
-  left: { walk:[rect...] },
-  right:{ walk:[rect...] }
-}
-rect = {sx, sy, sw, sh}
+  rect = { sx, sy, sw, sh } in source image pixels.
+
+  These were tuned to your current layout (tall sheet with 5 "bands"):
+  Row 1: Idle Down (3)
+  Row 2: Walk Right (4)
+  Row 3: Walk Left (4)
+  Row 4: Walk Down (3)
+  Row 5: Walk Up (3)
 */
+const PLAYER_FRAMES = {
+  down: {
+    idle: [
+      { sx: 128, sy: 0, sw: 165, sh: 426 },
+      { sx: 531, sy: 0, sw: 176, sh: 426 },
+      { sx: 955, sy: 0, sw: 174, sh: 426 },
+    ],
+    walk: [
+      { sx: 110, sy: 1174, sw: 186, sh: 532 },
+      { sx: 522, sy: 1174, sw: 203, sh: 532 },
+      { sx: 932, sy: 1174, sw: 194, sh: 532 },
+    ],
+  },
 
-function buildPlayerFramesFromImage(img) {
-  // Detect non-background pixels and segment into rows/cols.
-  // Your sheet has dark background + magenta noise; this finds “not dark” pixels.
-  const off = document.createElement("canvas");
-  off.width = img.width;
-  off.height = img.height;
-  const octx = off.getContext("2d", { willReadFrequently: true });
-  octx.drawImage(img, 0, 0);
+  right: {
+    walk: [
+      { sx: 128, sy: 344, sw: 167, sh: 512 },
+      { sx: 537, sy: 344, sw: 166, sh: 512 },
+      { sx: 949, sy: 344, sw: 160, sh: 512 },
+      { sx: 1356, sy: 403, sw: 159, sh: 453 },
+    ],
+  },
 
-  const { data, width, height } = octx.getImageData(0, 0, off.width, off.height);
+  left: {
+    walk: [
+      { sx: 120, sy: 754, sw: 172, sh: 502 },
+      { sx: 572, sy: 754, sw: 158, sh: 502 },
+      { sx: 938, sy: 754, sw: 174, sh: 502 },
+      { sx: 1378, sy: 754, sw: 161, sh: 481 },
+    ],
+  },
 
-  // Mask: pixel is "ink" if it's not near-black.
-  const ink = new Uint8Array(width * height);
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    // threshold tuned for your sheet: catches sprites + magenta edges, ignores black
-    ink[p] = (r + g + b) > 70 ? 1 : 0;
-  }
+  up: {
+    walk: [
+      { sx: 121, sy: 1594, sw: 208, sh: 454 },
+      { sx: 535, sy: 1594, sw: 201, sh: 454 },
+      { sx: 942, sy: 1594, sw: 200, sh: 454 },
+    ],
+  },
+};
 
-  // Row projection: find y bands that contain ink
-  const rowHas = new Uint8Array(height);
-  for (let y = 0; y < height; y++) {
-    let any = 0;
-    const base = y * width;
-    for (let x = 0; x < width; x++) { if (ink[base + x]) { any = 1; break; } }
-    rowHas[y] = any;
-  }
+function getPlayerFramesForState() {
+  const moving = (keys.up || keys.down || keys.left || keys.right);
 
-  // Group contiguous y into bands (sprites rows)
-  const bands = [];
-  let y = 0;
-  while (y < height) {
-    while (y < height && !rowHas[y]) y++;
-    if (y >= height) break;
-    let y0 = y;
-    while (y < height && rowHas[y]) y++;
-    let y1 = y - 1;
-
-    // trim tiny bands (noise)
-    if (y1 - y0 > 30) bands.push({ y0, y1 });
-  }
-
-  // We expect ~5 bands; if more, keep the 5 largest
-  bands.sort((a, b) => (b.y1 - b.y0) - (a.y1 - a.y0));
-  const picked = bands.slice(0, 5).sort((a, b) => a.y0 - b.y0);
-
-  // For each band, find x segments and compute tight bbox per segment
-  const rows = [];
-  for (const band of picked) {
-    const colHas = new Uint8Array(width);
-
-    for (let x = 0; x < width; x++) {
-      let any = 0;
-      for (let yy = band.y0; yy <= band.y1; yy++) {
-        if (ink[yy * width + x]) { any = 1; break; }
-      }
-      colHas[x] = any;
+  if (!moving) {
+    // Idle: only have explicit idle for down; otherwise use first walk frame
+    if (player.facing === "down" && PLAYER_FRAMES.down.idle.length) {
+      return PLAYER_FRAMES.down.idle;
     }
-
-    const segs = [];
-    let x = 0;
-    while (x < width) {
-      while (x < width && !colHas[x]) x++;
-      if (x >= width) break;
-      let x0 = x;
-      while (x < width && colHas[x]) x++;
-      let x1 = x - 1;
-
-      if (x1 - x0 > 30) segs.push({ x0, x1 });
-    }
-
-    // For each segment, compute bbox
-    const rects = [];
-    for (const s of segs) {
-      let minX = width, minY = height, maxX = 0, maxY = 0;
-      for (let yy = band.y0; yy <= band.y1; yy++) {
-        const base = yy * width;
-        for (let xx = s.x0; xx <= s.x1; xx++) {
-          if (ink[base + xx]) {
-            if (xx < minX) minX = xx;
-            if (xx > maxX) maxX = xx;
-            if (yy < minY) minY = yy;
-            if (yy > maxY) maxY = yy;
-          }
-        }
-      }
-      // pad a little so feet/hair don't get clipped
-      const pad = 6;
-      minX = clamp(minX - pad, 0, width - 1);
-      minY = clamp(minY - pad, 0, height - 1);
-      maxX = clamp(maxX + pad, 0, width - 1);
-      maxY = clamp(maxY + pad, 0, height - 1);
-
-      rects.push({ sx: minX, sy: minY, sw: (maxX - minX + 1), sh: (maxY - minY + 1) });
-    }
-
-    // sort left->right
-    rects.sort((a, b) => a.sx - b.sx);
-    rows.push(rects);
+    return (PLAYER_FRAMES[player.facing]?.walk || PLAYER_FRAMES.down.walk);
   }
 
-  // Map your sheet rows to actions (based on how your image is arranged):
-  // Row 0: idle down (3)
-  // Row 1: walk right (4)
-  // Row 2: walk left (4)
-  // Row 3: walk down (3)
-  // Row 4: walk up (3)
-  // If a row ends up with fewer frames detected, it still works.
-  const r0 = rows[0] || [];
-  const r1 = rows[1] || [];
-  const r2 = rows[2] || [];
-  const r3 = rows[3] || [];
-  const r4 = rows[4] || [];
-
-  return {
-    down: { idle: r0.slice(0, 3), walk: r3.slice(0, 3) },
-    right: { walk: r1.slice(0, 4) },
-    left: { walk: r2.slice(0, 4) },
-    up: { walk: r4.slice(0, 3) },
-  };
+  return (PLAYER_FRAMES[player.facing]?.walk || PLAYER_FRAMES.down.walk);
 }
 
 function drawPlayer(worldX, worldY) {
-  if (!PLAYER_FRAMES) {
-    // fallback if frames not ready
-    drawCenteredSticker(IMG.player, worldX, worldY, 0.35);
-    return;
-  }
-
-  const moving = (keys.up || keys.down || keys.left || keys.right);
-
-  // Pick correct frames list
-  let frames = null;
-
-  if (!moving) {
-    // idle: prefer down idle; else first frame of facing walk
-    if (player.facing === "down" && PLAYER_FRAMES.down.idle.length) {
-      frames = PLAYER_FRAMES.down.idle;
-    } else {
-      frames = (PLAYER_FRAMES[player.facing]?.walk || PLAYER_FRAMES.down.walk);
-    }
-  } else {
-    frames = (PLAYER_FRAMES[player.facing]?.walk || PLAYER_FRAMES.down.walk);
-  }
-
+  const frames = getPlayerFramesForState();
   if (!frames || frames.length === 0) {
+    // Fallback: draw entire sheet (should not happen)
     drawCenteredSticker(IMG.player, worldX, worldY, 0.35);
     return;
   }
@@ -330,13 +283,11 @@ function drawPlayer(worldX, worldY) {
   const idx = player.animFrame % frames.length;
   const fr = frames[idx];
 
-  // draw sliced frame
   const x = worldX - camera.x;
   const y = worldY - camera.y;
 
-  // Scale frame up/down for game size
-  const scale = 1.0; // source slice is already “tight”; we will size it manually
-  const targetH = 80; // how tall the player appears on screen
+  // On-screen size of player (tweak this if needed)
+  const targetH = 86; // in CSS pixels
   const aspect = fr.sw / fr.sh;
   const targetW = targetH * aspect;
 
@@ -345,12 +296,12 @@ function drawPlayer(worldX, worldY) {
     fr.sx, fr.sy, fr.sw, fr.sh,
     Math.floor(x - targetW / 2),
     Math.floor(y - targetH / 2),
-    Math.floor(targetW * scale),
-    Math.floor(targetH * scale)
+    Math.floor(targetW),
+    Math.floor(targetH)
   );
 }
 
-// ---------- Update / Draw ----------
+// ---------- Update & Draw ----------
 let last = performance.now();
 
 function update(dt) {
@@ -360,75 +311,91 @@ function update(dt) {
   if (keys.left) vx -= 1;
   if (keys.right) vx += 1;
 
+  // Normalize diagonal
   if (vx !== 0 && vy !== 0) {
     const inv = 1 / Math.hypot(vx, vy);
-    vx *= inv; vy *= inv;
+    vx *= inv;
+    vy *= inv;
   }
 
   const moving = (vx !== 0 || vy !== 0);
 
   if (moving) {
-    if (Math.abs(vx) > Math.abs(vy)) player.facing = vx > 0 ? "right" : "left";
-    else player.facing = vy > 0 ? "down" : "up";
+    // Facing
+    if (Math.abs(vx) > Math.abs(vy)) {
+      player.facing = vx > 0 ? "right" : "left";
+    } else {
+      player.facing = vy > 0 ? "down" : "up";
+    }
 
+    // Animate
     player.animTime += dt;
     if (player.animTime > 0.12) {
       player.animTime = 0;
-      player.animFrame = (player.animFrame + 1) % 1000;
+      player.animFrame = (player.animFrame + 1) % 1000000;
     }
   } else {
     player.animTime = 0;
     player.animFrame = 0;
   }
 
-  const nx = player.x + vx * player.speed * dt;
-  const ny = player.y + vy * player.speed * dt;
+  // Move
+  player.x = clamp(player.x + vx * player.speed * dt, 0, WORLD.width);
+  player.y = clamp(player.y + vy * player.speed * dt, 0, WORLD.height);
 
-  player.x = clamp(nx, 0, WORLD.width);
-  player.y = clamp(ny, 0, WORLD.height);
-
-  // collide trees
+  // Tree collision
   for (const t of trees) {
-    const res = resolveCircleCollision(player.x, player.y, player.size * 0.55, t.x, t.y, t.r);
+    const res = resolveCircleCollision(player.x, player.y, player.collR, t.x, t.y, t.r);
     player.x = res.x;
     player.y = res.y;
   }
 
-  // unicorn found
+  // Unicorn found
   if (!unicorn.found) {
-    const d = dist(player.x, player.y, unicorn.x, unicorn.y);
-    if (d < (player.size + unicorn.size) * 0.55) unicorn.found = true;
+    if (dist(player.x, player.y, unicorn.x, unicorn.y) < (player.collR + unicorn.collR)) {
+      unicorn.found = true;
+    }
   }
 
+  // Camera follow
   const viewW = window.innerWidth;
   const viewH = window.innerHeight;
+
   camera.x = clamp(player.x - viewW / 2, 0, Math.max(0, WORLD.width - viewW));
   camera.y = clamp(player.y - viewH / 2, 0, Math.max(0, WORLD.height - viewH));
 }
 
-function draw() {
+function drawHUD() {
+  ctx.font = "16px sans-serif";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(12, 12, 290, 30);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(unicorn.found ? "You found the unicorn!" : "Find the unicorn…", 22, 33);
+}
+
+function drawPlay() {
   const viewW = window.innerWidth;
   const viewH = window.innerHeight;
 
   ctx.clearRect(0, 0, viewW, viewH);
 
+  // Grass
   drawTiled(IMG.grass, camera.x, camera.y, viewW, viewH);
 
-  // Trees (still sticker-style for simplicity)
-  for (const t of trees) drawCenteredSticker(IMG.trees, t.x, t.y, 0.35);
+  // Trees (simple "sticker" draw of entire trees.png)
+  for (const t of trees) {
+    drawCenteredSticker(IMG.trees, t.x, t.y, 0.35);
+  }
 
-  // Unicorn (sticker-style)
-  if (!unicorn.found) drawCenteredSticker(IMG.unicorn, unicorn.x, unicorn.y, 0.35);
+  // Unicorn (simple "sticker" draw of entire unicorn.png)
+  if (!unicorn.found) {
+    drawCenteredSticker(IMG.unicorn, unicorn.x, unicorn.y, 0.35);
+  }
 
-  // Player (NOW sliced + animated)
+  // Player (cropped + animated)
   drawPlayer(player.x, player.y);
 
-  // HUD
-  ctx.font = "16px sans-serif";
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(12, 12, 260, 30);
-  ctx.fillStyle = "#fff";
-  ctx.fillText(unicorn.found ? "You found the unicorn!" : "Find the unicorn…", 22, 33);
+  drawHUD();
 }
 
 function drawTitle() {
@@ -452,8 +419,12 @@ function loop(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
 
-  if (state === "title") drawTitle();
-  else { update(dt); draw(); }
+  if (state === "title") {
+    drawTitle();
+  } else {
+    update(dt);
+    drawPlay();
+  }
 
   requestAnimationFrame(loop);
 }
@@ -476,9 +447,6 @@ function loop(now) {
     IMG.title = titleImg;
 
     generateTrees(22);
-
-    // Build slices for YOUR non-grid player sheet
-    PLAYER_FRAMES = buildPlayerFramesFromImage(IMG.player);
 
     assetsReady = true;
     requestAnimationFrame(loop);
