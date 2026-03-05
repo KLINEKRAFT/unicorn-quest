@@ -1,6 +1,6 @@
-// Unicorn Quest - complete game.js
-// Uses your existing assets + title screen + theme music + mobile D-pad
-// Player animation is HARD-CROPPED to match your current non-grid player.png.
+// Unicorn Quest - complete game.js (copy/paste whole file)
+// Title screen + theme music + mobile D-pad + grass tiling + tree obstacles + unicorn goal
+// Player uses HARD-CROPPED frames for your current non-grid player.png.
 //
 // Expected files (case-sensitive):
 // assets/grass.png
@@ -80,8 +80,7 @@ const unicorn = {
   found: false,
 };
 
-// ---------- Trees as obstacles ----------
-const trees = [];
+// ---------- Helpers ----------
 function dist(x1, y1, x2, y2) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
@@ -98,6 +97,8 @@ function resolveCircleCollision(px, py, pr, ox, oy, or) {
   return { x: px + (dx / d) * push, y: py + (dy / d) * push };
 }
 
+// ---------- Trees as obstacles ----------
+const trees = [];
 function generateTrees(count = 22) {
   trees.length = 0;
   for (let i = 0; i < count; i++) {
@@ -206,54 +207,49 @@ function drawCenteredSticker(img, worldX, worldY, scale = 1) {
   );
 }
 
-// ---------- HARD-CROPPED PLAYER FRAMES (for your current player.png) ----------
-/*
-  rect = { sx, sy, sw, sh } in source image pixels.
-
-  These were tuned to your current layout (tall sheet with 5 "bands"):
-  Row 1: Idle Down (3)
-  Row 2: Walk Right (4)
-  Row 3: Walk Left (4)
-  Row 4: Walk Down (3)
-  Row 5: Walk Up (3)
-*/
+// ---------- HARD-CROPPED PLAYER FRAMES (UPDATED) ----------
 const PLAYER_FRAMES = {
   down: {
+    // Row 1 (idle down) - 3 frames
     idle: [
-      { sx: 128, sy: 0, sw: 165, sh: 426 },
-      { sx: 531, sy: 0, sw: 176, sh: 426 },
-      { sx: 955, sy: 0, sw: 174, sh: 426 },
+      { sx: 105, sy: 0, sw: 214, sh: 357 },
+      { sx: 516, sy: 0, sw: 213, sh: 357 },
+      { sx: 934, sy: 0, sw: 214, sh: 357 },
     ],
+    // Row 4 (walk down) - 3 frames
     walk: [
-      { sx: 110, sy: 1174, sw: 186, sh: 532 },
-      { sx: 522, sy: 1174, sw: 203, sh: 532 },
-      { sx: 932, sy: 1174, sw: 194, sh: 532 },
+      { sx: 96, sy: 1094, sw: 233, sh: 663 },
+      { sx: 518, sy: 1094, sw: 212, sh: 663 },
+      { sx: 928, sy: 1094, sw: 209, sh: 663 },
     ],
   },
 
   right: {
+    // Row 2 (walk right) - 4 frames
     walk: [
-      { sx: 128, sy: 344, sw: 167, sh: 512 },
-      { sx: 537, sy: 344, sw: 166, sh: 512 },
-      { sx: 949, sy: 344, sw: 160, sh: 512 },
-      { sx: 1356, sy: 403, sw: 159, sh: 453 },
+      { sx: 115, sy: 324, sw: 194, sh: 403 },
+      { sx: 525, sy: 324, sw: 193, sh: 403 },
+      { sx: 940, sy: 324, sw: 173, sh: 403 },
+      { sx: 1350, sy: 403, sw: 170, sh: 324 },
     ],
   },
 
   left: {
+    // Row 3 (walk left) - 4 frames
     walk: [
-      { sx: 120, sy: 754, sw: 172, sh: 502 },
-      { sx: 572, sy: 754, sw: 158, sh: 502 },
-      { sx: 938, sy: 754, sw: 174, sh: 502 },
-      { sx: 1378, sy: 754, sw: 161, sh: 481 },
+      { sx: 103, sy: 714, sw: 202, sh: 403 },
+      { sx: 543, sy: 714, sw: 195, sh: 403 },
+      { sx: 928, sy: 714, sw: 196, sh: 403 },
+      { sx: 1356, sy: 714, sw: 188, sh: 403 },
     ],
   },
 
   up: {
+    // Row 5 (walk up / back) - 3 frames
     walk: [
-      { sx: 121, sy: 1594, sw: 208, sh: 454 },
-      { sx: 535, sy: 1594, sw: 201, sh: 454 },
-      { sx: 942, sy: 1594, sw: 200, sh: 454 },
+      { sx: 80, sy: 1744, sw: 253, sh: 304 },
+      { sx: 511, sy: 1744, sw: 231, sh: 304 },
+      { sx: 920, sy: 1744, sw: 228, sh: 304 },
     ],
   },
 };
@@ -262,7 +258,6 @@ function getPlayerFramesForState() {
   const moving = (keys.up || keys.down || keys.left || keys.right);
 
   if (!moving) {
-    // Idle: only have explicit idle for down; otherwise use first walk frame
     if (player.facing === "down" && PLAYER_FRAMES.down.idle.length) {
       return PLAYER_FRAMES.down.idle;
     }
@@ -272,10 +267,10 @@ function getPlayerFramesForState() {
   return (PLAYER_FRAMES[player.facing]?.walk || PLAYER_FRAMES.down.walk);
 }
 
+// Anchor sprite by feet to avoid clipping/floating
 function drawPlayer(worldX, worldY) {
   const frames = getPlayerFramesForState();
   if (!frames || frames.length === 0) {
-    // Fallback: draw entire sheet (should not happen)
     drawCenteredSticker(IMG.player, worldX, worldY, 0.35);
     return;
   }
@@ -286,16 +281,19 @@ function drawPlayer(worldX, worldY) {
   const x = worldX - camera.x;
   const y = worldY - camera.y;
 
-  // On-screen size of player (tweak this if needed)
-  const targetH = 86; // in CSS pixels
+  // How tall the player appears on screen (tweak this)
+  const targetH = 96;
   const aspect = fr.sw / fr.sh;
   const targetW = targetH * aspect;
+
+  // feet anchor (moves sprite down a bit so feet sit on ground)
+  const feetY = y + 22;
 
   ctx.drawImage(
     IMG.player,
     fr.sx, fr.sy, fr.sw, fr.sh,
     Math.floor(x - targetW / 2),
-    Math.floor(y - targetH / 2),
+    Math.floor(feetY - targetH),
     Math.floor(targetW),
     Math.floor(targetH)
   );
@@ -382,12 +380,12 @@ function drawPlay() {
   // Grass
   drawTiled(IMG.grass, camera.x, camera.y, viewW, viewH);
 
-  // Trees (simple "sticker" draw of entire trees.png)
+  // Trees (simple full-image draw)
   for (const t of trees) {
     drawCenteredSticker(IMG.trees, t.x, t.y, 0.35);
   }
 
-  // Unicorn (simple "sticker" draw of entire unicorn.png)
+  // Unicorn (simple full-image draw)
   if (!unicorn.found) {
     drawCenteredSticker(IMG.unicorn, unicorn.x, unicorn.y, 0.35);
   }
